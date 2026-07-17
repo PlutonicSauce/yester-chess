@@ -15,4 +15,5 @@ export const rowOf = (square: Square) => Math.floor(square / 6);
 export const colOf = (square: Square) => square % 6;
 export const squareName = (square: Square) => `${String.fromCharCode(65 + colOf(square))}${6 - rowOf(square)}`;
 export const homeRows = (player: Player) => player === 'amber' ? [4, 5] : [0, 1];
-export const label = (player: Player) => player === 'amber' ? 'Amber' : 'Violet';
+// Internal keys stay stable for the rules engine. The product only exposes classic chess sides.
+export const label = (player: Player) => player === 'amber' ? 'White' : 'Black';
