@@ -2,10 +2,11 @@ import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { activeGateway } from './game/gateway';
 import { initialGame, ownPieceAt, validSetupMove } from './game/rules';
-import { GameState, label, PieceKind, Player, rowOf, Square, squareName } from './game/types';
+import { colOf, GameState, label, Piece, PieceKind, Player, rowOf, Square, squareName } from './game/types';
 import './styles.css';
 
 const gateway = activeGateway;
+type MoveMotion = { piece: Piece; from: Square; to: Square; active: boolean };
 
 function PieceMark({ kind, player, compact = false }: { kind: PieceKind; player: Player; compact?: boolean }) {
   const className = `piece-mark ${player === 'amber' ? 'white-piece' : 'black-piece'} ${compact ? 'compact' : ''}`;
@@ -20,6 +21,9 @@ function App() {
   const [game, setGame] = useState<GameState>(initialGame);
   const [wallet, setWallet] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [showGuide, setShowGuide] = useState(true);
+  const [lastMove, setLastMove] = useState<{ from: Square; to: Square } | null>(null);
+  const [motion, setMotion] = useState<MoveMotion | null>(null);
 
   const placeSetup = (from: Square, to: Square) => {
     if (validSetupMove(game, game.viewer, from, to)) {
@@ -38,7 +42,18 @@ function App() {
       return;
     }
     if (game.viewer !== game.turn || game.phase !== 'play') return;
-    setBusy(true); setGame(await gateway.submitMove(game, from, square)); setBusy(false);
+    const movingPiece = ownPieceAt(game, game.turn, from);
+    setBusy(true);
+    const nextGame = await gateway.submitMove(game, from, square);
+    const isLegal = nextGame.feedback[0]?.kind !== 'illegal';
+    if (movingPiece && isLegal) {
+      const nextMotion = { piece: movingPiece, from, to: square, active: false };
+      setMotion(nextMotion);
+      setLastMove({ from, to: square });
+      requestAnimationFrame(() => setMotion({ ...nextMotion, active: true }));
+      window.setTimeout(() => setMotion(null), 480);
+    }
+    setGame(nextGame); setBusy(false);
   };
 
   const markReady = () => {
@@ -70,6 +85,16 @@ function App() {
       <div className="viewer-switch"><span>Viewing as</span><div className="switch-control">{(['amber', 'violet'] as Player[]).map((player) => <button key={player} className={game.viewer === player ? 'active' : ''} onClick={() => setGame({ ...game, viewer: player, selected: null })}><SideMark player={player} />{label(player)}</button>)}</div></div>
     </section>
 
+    <section className={`guide ${showGuide ? 'open' : ''}`} aria-label="How to play">
+      <button className="guide-toggle" onClick={() => setShowGuide(!showGuide)}><span>How to play</span><small>{showGuide ? 'Hide guide' : 'Three minutes to your first game'}</small><b>{showGuide ? '−' : '+'}</b></button>
+      {showGuide && <div className="guide-steps">
+        <div><span>01</span><p><strong>Arrange in secret</strong>Place five pieces anywhere in your two home ranks, then lock the formation.</p></div>
+        <div><span>02</span><p><strong>Read the board</strong>Your opponent begins unseen. A moved piece becomes an anonymous token—never a named piece.</p></div>
+        <div><span>03</span><p><strong>Choose a move</strong>Move as king, knight, or pawn. The referee confirms only what both sides may know.</p></div>
+        <div><span>04</span><p><strong>Take the king</strong>Capture ends the game. “Check” is a warning, not a checkmate puzzle.</p></div>
+      </div>}
+    </section>
+
     <div className="game-layout">
       <section className="board-area">
         <div className="board-meta"><span>Game board</span><span>6 × 6</span></div>
@@ -78,12 +103,15 @@ function App() {
             const known = ownPieceAt(game, game.viewer, square);
             const publicToken = game.observed.find((token) => token.square === square && token.owner !== game.viewer);
             const selected = game.selected === square;
-            return <button key={square} className={`cell ${(rowOf(square) + square % 6) % 2 ? 'dark' : 'light'} ${selected ? 'selected' : ''}`} onClick={() => clickSquare(square)} onDragOver={(event) => { if (game.phase === 'setup') event.preventDefault(); }} onDrop={(event) => { event.preventDefault(); const from = Number(event.dataTransfer.getData('text/plain')); if (Number.isInteger(from)) placeSetup(from, square); }} disabled={busy}>
+            const isArriving = motion?.piece.id === known?.id && motion.to === square;
+            const lastMoveClass = lastMove?.from === square ? 'last-from' : lastMove?.to === square ? 'last-to' : '';
+            return <button key={square} className={`cell ${(rowOf(square) + square % 6) % 2 ? 'dark' : 'light'} ${selected ? 'selected' : ''} ${lastMoveClass} ${isArriving ? 'arriving' : ''}`} onClick={() => clickSquare(square)} onDragOver={(event) => { if (game.phase === 'setup') event.preventDefault(); }} onDrop={(event) => { event.preventDefault(); const from = Number(event.dataTransfer.getData('text/plain')); if (Number.isInteger(from)) placeSetup(from, square); }} disabled={busy}>
               <span className="coordinate">{squareName(square)}</span>
               {known && <span className="piece" draggable={game.phase === 'setup' && !game.ready[game.viewer]} onDragStart={(event) => event.dataTransfer.setData('text/plain', String(known.square))}><PieceMark kind={known.kind} player={known.owner} /></span>}
               {publicToken && <span className={`unknown-token ${publicToken.owner === 'amber' ? 'white-token' : 'black-token'}`} title="Unidentified opponent piece"><i /></span>}
             </button>;
           })}
+          {motion && <span className={`move-ghost ${motion.active ? 'in-flight' : ''}`} style={{ left: `${colOf(motion.from) * (100 / 6)}%`, top: `${rowOf(motion.from) * (100 / 6)}%`, transform: motion.active ? `translate(${(colOf(motion.to) - colOf(motion.from)) * 100}%, ${(rowOf(motion.to) - rowOf(motion.from)) * 100}%)` : 'translate(0, 0)' }}><PieceMark kind={motion.piece.kind} player={motion.piece.owner} /></span>}
         </section>
       </section>
 
